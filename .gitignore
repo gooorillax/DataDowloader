@@ -1,5 +1,5 @@
 
 *.gz
 warc.paths/warc.paths
-wget-log
-wget-log.1
+wget*
+wet.*

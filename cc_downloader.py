@@ -8,11 +8,15 @@ import logging
 
 url_path_queue = queue.Queue()
 download_threads = []
-download_history = {}
+download_history = dict()
 lock = threading.Lock()
 
 
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+
 def write_history(history_path: str) -> None:
+    global download_history
     with open(history_path, 'w') as output_history:
         json.dump(download_history, fp=output_history, indent=4)
     output_history.close()
@@ -27,6 +31,7 @@ def wget_url(url_path: str, output_prefix: str) -> bool:
     return True
 
 def download_worker(thread_id: int, output_prefix: str, history_path: str) -> None:
+    global download_history
     task_counter = 0
     while True:
         url_task = url_path_queue.get()
@@ -35,14 +40,14 @@ def download_worker(thread_id: int, output_prefix: str, history_path: str) -> No
         if url_task in download_history:
             continue
         task_counter += 1
-        logging.info('thread %d start downloading %s' % (thread_id, url_task))
+        log.info('thread %d start downloading %s' % (thread_id, url_task))
         if not wget_url(url_task, output_prefix):
-            logging.info('thread %d fail to download %s' % (thread_id, url_task))
+            log.info('thread %d fail to download %s' % (thread_id, url_task))
             continue
-        logging.info('thread %d finish to download %s' % (thread_id, url_task))
+        log.info('thread %d finish to download %s' % (thread_id, url_task))
+        lock.acquire()
         try:
-            lock.acquire()
-            # change or read from the list here
+            # keep finished url in history
             download_history[url_task] = 1
             if task_counter % 2 == 0:
                 write_history(history_path)
@@ -52,18 +57,18 @@ def download_worker(thread_id: int, output_prefix: str, history_path: str) -> No
     
 
 def download_url_paths(path_file: str, history_json: str, output_path: str, num_thread: int) -> bool:
-    
+    global download_history
+    # load download history
+    with open(history_json, 'r') as history_set:
+        download_history = json.load(history_set)
+    history_set.close()
+
     #create download thread
     for th_id in range(num_thread):
         thd = threading.Thread(target=download_worker, args=(th_id, output_path, history_json))
         thd.start()
         download_threads.append(thd)
         
-    # load download history
-    with open(history_json, 'r') as history_set:
-        download_history = json.load(history_set)
-    history_set.close()    
-    
     # write url_path into task queue
     with open(path_file, 'r') as path_list:
         for line in path_list:
@@ -75,6 +80,8 @@ def download_url_paths(path_file: str, history_json: str, output_path: str, num_
         url_path_queue.put(None)
     for thd in download_threads:
         thd.join()
+
+    write_history(history_json)
     return True
 
 def main():
